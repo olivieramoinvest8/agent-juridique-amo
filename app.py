@@ -1,22 +1,23 @@
 def recherche_brave(query):
-    """Fait une recherche web avec Brave Search"""
+    """Fait une recherche web avec DuckDuckGo"""
     headers = {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": BRAVE_API_KEY
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-    params = {"q": query, "count": 5, "lang": "fr", "country": "FR"}
+    params = {"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"}
     try:
         response = requests.get(
-            "https://api.search.brave.com/res/v1/web/search",
+            "https://api.duckduckgo.com/",
             headers=headers,
             params=params,
             timeout=10
         )
         data = response.json()
         resultats = []
-        for r in data.get("web", {}).get("results", []):
-            resultats.append(f"- {r.get('title', '')}: {r.get('description', '')}")
+        for r in data.get("RelatedTopics", [])[:5]:
+            if "Text" in r:
+                resultats.append(f"- {r.get('Text', '')}")
+        if not resultats:
+            resultats.append(f"Recherche effectuée sur: {query}")
         return "\n".join(resultats)
     except Exception as e:
         return f"Erreur recherche: {str(e)}"
