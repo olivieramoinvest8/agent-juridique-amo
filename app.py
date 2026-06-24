@@ -4,16 +4,58 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session, redirect
 from datetime import datetime
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS")
 GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
 EMAIL_DESTINATAIRE = os.environ.get("EMAIL_DESTINATAIRE")
+MOT_DE_PASSE = os.environ.get("MOT_DE_PASSE", "amoinvest2025")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 app = Flask(__name__)
+app.secret_key = os.environ.get("MOT_DE_PASSE", "amoinvest2025") + "_secret"
+
+LOGIN_PAGE = (
+    "<!DOCTYPE html>"
+    "<html lang='fr'>"
+    "<head>"
+    "<meta charset='UTF-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+    "<title>AMO Invest - Connexion</title>"
+    "<style>"
+    "* { margin: 0; padding: 0; box-sizing: border-box; }"
+    "body { font-family: Segoe UI, sans-serif; background: #f0f4f8; min-height: 100vh; display: flex; align-items: center; justify-content: center; }"
+    ".box { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 100%; max-width: 400px; text-align: center; }"
+    "h1 { color: #1a365d; font-size: 22px; margin-bottom: 8px; }"
+    "p { color: #4a5568; font-size: 14px; margin-bottom: 24px; }"
+    "input { width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px; outline: none; margin-bottom: 16px; }"
+    "input:focus { border-color: #1a365d; }"
+    "button { width: 100%; background: #1a365d; color: white; border: none; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; }"
+    "button:hover { background: #2a4a7f; }"
+    ".erreur { color: #e53e3e; font-size: 13px; margin-bottom: 12px; }"
+    "</style>"
+    "</head>"
+    "<body>"
+    "<div class='box'>"
+    "<h1>Juriste AMO Invest</h1>"
+    "<p>Acces reserve a l equipe AMO Invest</p>"
+    "{erreur}"
+    "<input type='password' id='mdp' placeholder='Mot de passe' onkeydown='if(event.key==`Enter`)document.getElementById(`btn`).click()' />"
+    "<button id='btn' onclick='login()'>Se connecter</button>"
+    "</div>"
+    "<script>"
+    "function login() {"
+    "var mdp = document.getElementById('mdp').value;"
+    "fetch('/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({mdp: mdp}) })"
+    ".then(function(r) { return r.json(); })"
+    ".then(function(d) { if (d.ok) { window.location.href = '/'; } else { window.location.reload(); } });"
+    "}"
+    "</script>"
+    "</body>"
+    "</html>"
+)
 
 HTML_PAGE = (
     "<!DOCTYPE html>"
@@ -40,8 +82,8 @@ HTML_PAGE = (
     ".send-btn { background: #1a365d; color: white; border: none; border-radius: 10px; padding: 0 24px; font-size: 14px; font-weight: 600; cursor: pointer; }"
     ".send-btn:hover { background: #2a4a7f; }"
     ".send-btn:disabled { background: #a0aec0; cursor: not-allowed; }"
-    ".veille-btn { margin-top: 16px; background: #276749; padding: 10px 20px; border-radius: 8px; color: white; border: none; cursor: pointer; font-size: 13px; }"
-    ".footer { margin-top: 16px; color: #718096; font-size: 12px; }"
+    ".deconnexion { margin-top: 12px; background: none; border: none; color: #718096; font-size: 12px; cursor: pointer; text-decoration: underline; }"
+    ".footer { margin-top: 8px; color: #718096; font-size: 12px; }"
     "</style>"
     "</head>"
     "<body>"
@@ -58,7 +100,7 @@ HTML_PAGE = (
     "<button class='send-btn' id='btn'>Envoyer</button>"
     "</div>"
     "</div>"
-    "<button class='veille-btn' id='veilleBtn'>Lancer la veille juridique maintenant</button>"
+    "<button class='deconnexion' onclick='deconnexion()'>Se deconnecter</button>"
     "<div class='footer'>AMO Invest - Graveson (13) - Usage interne uniquement</div>"
     "<script>"
     "document.getElementById('question').addEventListener('keydown', function(e) {"
@@ -94,15 +136,9 @@ HTML_PAGE = (
     "messagesDiv.appendChild(d); btn.disabled = false;"
     "});"
     "});"
-    "document.getElementById('veilleBtn').addEventListener('click', function() {"
-    "if (!confirm('Lancer la veille juridique ? Un email vous sera envoye.')) return;"
-    "var btn = document.getElementById('veilleBtn');"
-    "btn.disabled = true; btn.textContent = 'Veille en cours...';"
-    "fetch('/veille', { method: 'POST' })"
-    ".then(function(r) { return r.json(); })"
-    ".then(function(data) { alert(data.message); btn.disabled = false; btn.textContent = 'Lancer la veille juridique maintenant'; })"
-    ".catch(function() { alert('Erreur.'); btn.disabled = false; btn.textContent = 'Lancer la veille juridique maintenant'; });"
-    "});"
+    "function deconnexion() {"
+    "fetch('/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });"
+    "}"
     "</script>"
     "</body>"
     "</html>"
@@ -115,83 +151,42 @@ SYSTEME_JURIDIQUE = (
     "Tu reponds avec la precision d un avocat specialise, en citant les textes de loi applicables. "
     "Tu es direct, concis et pratique. "
     "Tu couvres : vente, achat, mandat, transaction, location nue et meublee, gestion locative, "
-    "copropriete, urbanisme, permis de construire, fiscalite, diagnostics obligatoires, droit des baux."
+    "copropriete, urbanisme, permis de construire, fiscalite, diagnostics obligatoires, droit des baux, "
+    "Legifrance, jurisprudence des cours d appel et de la Cour de cassation. "
+    "Quand tu cites une loi, indique toujours le numero et l article exact. "
+    "Si une question depasse tes competences, dis-le clairement."
 )
 
-THEMES_VEILLE = [
-    "nouvelles lois decrets immobilier location France 2025",
-    "reforme transaction immobiliere mandat agence 2025",
-    "DPE diagnostic immobilier obligation nouveaute 2025",
-    "fiscalite immobiliere plus-value IFI 2025",
-    "jurisprudence droit bail locataire bailleur 2025",
-    "urbanisme permis construire reglementation 2025"
-]
+def est_connecte():
+    return session.get("connecte") == True
 
-def recherche_duckduckgo(query):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    params = {"q": query, "format": "json", "no_html": "1"}
-    try:
-        response = requests.get(
-            "https://api.duckduckgo.com/",
-            headers=headers,
-            params=params,
-            timeout=10
-        )
-        data = response.json()
-        resultats = []
-        for r in data.get("RelatedTopics", [])[:5]:
-            if "Text" in r:
-                resultats.append("- " + r.get("Text", ""))
-        if not resultats:
-            resultats.append("Theme: " + query)
-        return "\n".join(resultats)
-    except Exception as e:
-        return "Theme: " + query
+@app.route("/login", methods=["GET"])
+def login_page():
+    return LOGIN_PAGE.replace("{erreur}", "")
 
-def faire_veille():
-    tous_resultats = []
-    for theme in THEMES_VEILLE:
-        resultats = recherche_duckduckgo(theme)
-        tous_resultats.append("THEME: " + theme + "\n" + resultats)
-    contenu = "\n\n".join(tous_resultats)
-    prompt = (
-        "Voici les resultats de recherche sur l actualite juridique immobiliere:\n\n"
-        + contenu
-        + "\n\nRedige une veille juridique mensuelle structuree pour AMO Invest, "
-        "agence immobiliere a Graveson (13690). "
-        "Ne mentionne que les vraies nouveautes. "
-        "Structure par theme avec titres clairs. "
-        "Impact concret pour l agence a chaque point. "
-        "Date: " + datetime.now().strftime("%B %Y")
-    )
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    veille_text = message.content[0].text
-    envoyer_email(veille_text)
-    return veille_text
+@app.route("/login", methods=["POST"])
+def login_action():
+    data = request.get_json()
+    if data.get("mdp") == MOT_DE_PASSE:
+        session["connecte"] = True
+        return jsonify({"ok": True})
+    return jsonify({"ok": False})
 
-def envoyer_email(contenu):
-    msg = MIMEMultipart()
-    msg["From"] = GMAIL_ADDRESS
-    msg["To"] = EMAIL_DESTINATAIRE
-    msg["Subject"] = "Veille Juridique Immobiliere - " + datetime.now().strftime("%B %Y")
-    msg.attach(MIMEText(contenu, "plain", "utf-8"))
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(GMAIL_ADDRESS, GMAIL_PASSWORD)
-            server.send_message(msg)
-    except Exception as e:
-        print("Erreur email: " + str(e))
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
 
 @app.route("/")
 def index():
+    if not est_connecte():
+        return redirect("/login")
     return HTML_PAGE
 
 @app.route("/question", methods=["POST"])
 def repondre_question():
+    if not est_connecte():
+        return jsonify({"reponse": "Non autorise."})
     data = request.get_json()
     question = data.get("question", "")
     message = client.messages.create(
@@ -204,11 +199,9 @@ def repondre_question():
 
 @app.route("/veille", methods=["POST"])
 def lancer_veille():
-    try:
-        faire_veille()
-        return jsonify({"message": "Veille terminee ! Email envoye avec succes."})
-    except Exception as e:
-        return jsonify({"message": "Erreur: " + str(e)})
+    if not est_connecte():
+        return jsonify({"message": "Non autorise."})
+    return jsonify({"message": "Veille disponible prochainement."})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
