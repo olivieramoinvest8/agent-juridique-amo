@@ -167,7 +167,6 @@ SYSTEME_JURIDIQUE = (
     "declaration prealable, fiscalite, diagnostics obligatoires, droit des baux, contentieux locatif, "
     "expulsion, depot de garantie, charges locatives, etat des lieux, assurances."
 )
-)
 
 def est_connecte():
     return session.get("connecte") == True
